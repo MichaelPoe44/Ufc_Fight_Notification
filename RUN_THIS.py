@@ -57,6 +57,7 @@ subprocess.check_call([
     "-m",
     "pip",
     "install",
+    "-q",
     "-r",
     str(REQUIREMENTS)
 ])

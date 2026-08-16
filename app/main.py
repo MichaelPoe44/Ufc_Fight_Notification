@@ -33,7 +33,10 @@ USER_AGENT = (
 # ============================================================
 
 def send_notification(target_fight, previous_fight):
-    SOUND_FILE = "notification.mp3"
+    SOUND_FILE = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "sound.mp3"
+    )
 
     print()
     print("=" * 65)
@@ -70,7 +73,7 @@ def send_notification(target_fight, previous_fight):
         print()
         print(f"ERROR: Could not find {SOUND_FILE}")
         print(
-            "Make sure notification.mp3 is in the same "
+            "Make sure sound.mp3 is in the same "
             "folder as main.py."
         )
 
@@ -386,76 +389,135 @@ def select_fight(fights):
 def fight_is_complete(page, fight):
 
     """
-    Look for evidence that this specific fight has finished.
-
-    Sherdog's live pages update their text as fights finish.
-    We look for the fighter names plus result information.
+    Check whether a specific fight has an official result
+    on Sherdog's live results page.
     """
 
-    fighter_parts = fight.split(" vs ")
+    # --------------------------------------------------------
+    # Split our fight string
+    # --------------------------------------------------------
+
+    fighter_parts = re.split(
+        r"\s+VS\s+",
+        fight,
+        flags=re.IGNORECASE
+    )
 
     if len(fighter_parts) != 2:
+
+        print("Could not split fight:")
+        print(fight)
+
         return False
 
     fighter1 = fighter_parts[0].strip()
     fighter2 = fighter_parts[1].strip()
 
+    print()
+    print("Checking fight:")
+    print(f"  Fighter 1: {fighter1}")
+    print(f"  Fighter 2: {fighter2}")
+
+    # --------------------------------------------------------
+    # Get ALL page text
+    # --------------------------------------------------------
+
     body = page.locator("body").inner_text()
 
-    # Normalize whitespace
     body = re.sub(r"\s+", " ", body)
 
+    body_lower = body.lower()
+
+    fighter1_lower = fighter1.lower()
+    fighter2_lower = fighter2.lower()
+
     # --------------------------------------------------------
-    # A completed fight on Sherdog generally has result
-    # information such as:
+    # Find both possible fighter orders
     #
-    #   The Official Result
-    #   Match
-    #   Method
-    #   Round
-    #   Time
+    # Sherdog might show:
     #
-    # We look near the two fighter names.
+    # Jalin Turner vs Kaue Fernandes
+    #
+    # OR:
+    #
+    # Kaue Fernandes vs Jalin Turner
     # --------------------------------------------------------
 
-    if fighter1 not in body or fighter2 not in body:
-        return False
+    pattern1 = re.escape(fighter1_lower) + r".{0,150}?" + re.escape(fighter2_lower)
 
-    # Split around first fighter occurrence
-    index1 = body.find(fighter1)
+    pattern2 = re.escape(fighter2_lower) + r".{0,150}?" + re.escape(fighter1_lower)
 
-    if index1 == -1:
-        return False
-
-    section = body[
-        max(0, index1 - 500):
-        index1 + 3000
-    ]
-
-    # Need both fighters nearby
-    if fighter2 not in section:
-        return False
-
-    completion_markers = [
-        "The Official Result",
-        "Official Result",
-        "Method",
-        "Decision",
-        "TKO",
-        "KO",
-        "Submission",
-        "Technical Decision",
-        "No Contest",
-        "Disqualification"
-    ]
-
-    marker_count = sum(
-        1
-        for marker in completion_markers
-        if marker.lower() in section.lower()
+    match = re.search(
+        pattern1,
+        body_lower,
+        flags=re.IGNORECASE
     )
 
-    return marker_count >= 2
+    if not match:
+
+        match = re.search(
+            pattern2,
+            body_lower,
+            flags=re.IGNORECASE
+        )
+
+    if not match:
+
+        print()
+        print("❌ Could not find both fighters together.")
+        print(f"Looking for:")
+        print(f"  {fighter1}")
+        print(f"  {fighter2}")
+
+        return False
+
+    # --------------------------------------------------------
+    # We found the fight heading.
+    #
+    # Use the position of THAT occurrence rather than
+    # the first fighter occurrence on the page.
+    # --------------------------------------------------------
+
+    fight_start = match.start()
+
+    print()
+    print("✅ Found the fight on the live page.")
+    print(f"Position in page text: {fight_start}")
+
+    # --------------------------------------------------------
+    # Print a large section around the fight for debugging
+    # --------------------------------------------------------
+
+    section = body[
+        max(0, fight_start - 200):
+        fight_start + 5000
+    ]
+
+    # --------------------------------------------------------
+    # Look for Official Result after the fight heading
+    # --------------------------------------------------------
+
+    section_lower = section.lower()
+
+    official_result = "the official result"
+
+    if official_result in section_lower:
+
+        print()
+        print("✅ THE OFFICIAL RESULT WAS FOUND!")
+        print()
+
+        return True
+
+    # --------------------------------------------------------
+    # If there is no official result yet, report that
+    # --------------------------------------------------------
+
+    print()
+    print("Official result not found yet.")
+    print()
+
+    return False
 
 
 # ============================================================
