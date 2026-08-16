@@ -37,7 +37,7 @@ def send_notification(target_fight, previous_fight):
         os.path.dirname(os.path.abspath(__file__)),
         "sound.mp3"
     )
-
+    
     print()
     print("=" * 65)
     print("🔔 YOUR UFC FIGHT IS NEXT")
@@ -389,12 +389,17 @@ def select_fight(fights):
 def fight_is_complete(page, fight):
 
     """
-    Check whether a specific fight has an official result
-    on Sherdog's live results page.
+    Determine whether a specific fight has an official result.
+
+    We search every "The Official Result" on the Sherdog page
+    and examine the text immediately following it.
+
+    The fight is considered complete only when the result
+    contains one of the two fighters being monitored.
     """
 
     # --------------------------------------------------------
-    # Split our fight string
+    # Split fighters
     # --------------------------------------------------------
 
     fighter_parts = re.split(
@@ -419,12 +424,14 @@ def fight_is_complete(page, fight):
     print(f"  Fighter 2: {fighter2}")
 
     # --------------------------------------------------------
-    # Get ALL page text
+    # Get entire page
     # --------------------------------------------------------
 
     body = page.locator("body").inner_text()
 
-    body = re.sub(r"\s+", " ", body)
+    # Normalize line endings
+    body = body.replace("\r\n", "\n")
+    body = body.replace("\r", "\n")
 
     body_lower = body.lower()
 
@@ -432,90 +439,140 @@ def fight_is_complete(page, fight):
     fighter2_lower = fighter2.lower()
 
     # --------------------------------------------------------
-    # Find both possible fighter orders
-    #
-    # Sherdog might show:
-    #
-    # Jalin Turner vs Kaue Fernandes
-    #
-    # OR:
-    #
-    # Kaue Fernandes vs Jalin Turner
+    # Find every "The Official Result"
     # --------------------------------------------------------
 
-    pattern1 = re.escape(fighter1_lower) + r".{0,150}?" + re.escape(fighter2_lower)
-
-    pattern2 = re.escape(fighter2_lower) + r".{0,150}?" + re.escape(fighter1_lower)
-
-    match = re.search(
-        pattern1,
-        body_lower,
-        flags=re.IGNORECASE
-    )
-
-    if not match:
-
-        match = re.search(
-            pattern2,
+    result_matches = list(
+        re.finditer(
+            r"the official result",
             body_lower,
             flags=re.IGNORECASE
         )
+    )
 
-    if not match:
-
-        print()
-        print("❌ Could not find both fighters together.")
-        print(f"Looking for:")
-        print(f"  {fighter1}")
-        print(f"  {fighter2}")
-
-        return False
+   
 
     # --------------------------------------------------------
-    # We found the fight heading.
-    #
-    # Use the position of THAT occurrence rather than
-    # the first fighter occurrence on the page.
+    # Examine each official result
     # --------------------------------------------------------
 
-    fight_start = match.start()
+    for match in (result_matches):
+
+        result_start = match.end()
+
+        # Look at the next 500 characters
+        result_area = body[
+            result_start:
+            result_start + 500
+        ]
+
+        result_area_clean = re.sub(
+            r"\s+",
+            " ",
+            result_area
+        ).strip()
+
+        result_area_lower = result_area_clean.lower()
+
+
+        # ----------------------------------------------------
+        # Does this result belong to our fight?
+        # ----------------------------------------------------
+
+        fighter1_found = (
+            fighter1_lower
+            in result_area_lower
+        )
+
+        fighter2_found = (
+            fighter2_lower
+            in result_area_lower
+        )
+
+        # ----------------------------------------------------
+        # If neither fighter is mentioned, this is another
+        # fight's result.
+        # ----------------------------------------------------
+
+        if not fighter1_found and not fighter2_found:
+            continue
+
+        # ----------------------------------------------------
+        # We found one of our fighters in an Official Result.
+        # Now make sure there is actually a result.
+        # ----------------------------------------------------
+
+
+        # ----------------------------------------------------
+        # Look for actual result wording.
+        #
+        # Sherdog commonly uses:
+        #
+        # Fighter def. Fighter—KO
+        # Fighter def. Fighter—Decision
+        # Fighter def. Fighter—Submission
+        #
+        # We also handle draws, no contests, etc.
+        # ----------------------------------------------------
+
+        result_patterns = [
+
+            # Normal winner result
+            r"\bdef\.",
+
+            # Draws
+            r"\bmajority draw\b",
+            r"\bsplit draw\b",
+            r"\btechnical draw\b",
+            r"\bdraw\b",
+
+            # No contest
+            r"\bno contest\b",
+
+            # Disqualification
+            r"\bdisqualification\b",
+        ]
+
+        actual_result = None
+
+        for pattern in result_patterns:
+
+            result_match = re.search(
+                pattern,
+                result_area_clean,
+                flags=re.IGNORECASE
+            )
+
+            if result_match:
+
+                actual_result = result_match.group(0)
+
+                break
+
+        # ----------------------------------------------------
+        # Actual result found
+        # ----------------------------------------------------
+
+        if actual_result:
+            return True
+
+        # ----------------------------------------------------
+        # Fighter found but result isn't populated yet
+        # ----------------------------------------------------
+
+        print(
+            "⚠️ Our fighter appears in the Official Result "
+            "section, but there is no actual result yet."
+        )
+
+    # --------------------------------------------------------
+    # None of the Official Results belonged to our fight
+    # --------------------------------------------------------
 
     print()
-    print("✅ Found the fight on the live page.")
-    print(f"Position in page text: {fight_start}")
-
-    # --------------------------------------------------------
-    # Print a large section around the fight for debugging
-    # --------------------------------------------------------
-
-    section = body[
-        max(0, fight_start - 200):
-        fight_start + 5000
-    ]
-
-    # --------------------------------------------------------
-    # Look for Official Result after the fight heading
-    # --------------------------------------------------------
-
-    section_lower = section.lower()
-
-    official_result = "the official result"
-
-    if official_result in section_lower:
-
-        print()
-        print("✅ THE OFFICIAL RESULT WAS FOUND!")
-        print()
-
-        return True
-
-    # --------------------------------------------------------
-    # If there is no official result yet, report that
-    # --------------------------------------------------------
-
-    print()
-    print("Official result not found yet.")
-    print()
+    print(
+        "❌ No completed result found for this fight."
+    )
 
     return False
 
